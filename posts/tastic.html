@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Ian Kuehne's Website</title>
+        <link rel="stylesheet" type="text/css" href="../css/style.css" />
+        <link rel="stylesheet" type="text/css" href="../css/syntax.css" />
+        <script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    </head>
+    <body>
+        <div class="banner"></div>
+        <div class="page">
+            <div class="header">
+                <ul>
+                    <li>
+                        <span class="title">
+                            <a href="../index.html">Ian Kuehne</a>
+                        </span>
+                    </li>
+                    <li><a href="../index.html">Home</a></li>
+                    <li><a href="../about.html">About</a></li>
+                </ul>
+            </div>
+            <br />
+            <hr />
+            <div class="main">
+                <h1 class="post-title">Plagiarism detection with MinHash: Part 1</h1>
+<br />
+
+<p>I recently encountered the <a href="https://en.wikipedia.org/wiki/MinHash">MinHash</a> algorithm, which gave me an idea for a project. You can read <a href="http://gatekeeper.dec.com/ftp/pub/dec/SRC/publications/broder/positano-final-wpnums.pdf">the original paper</a>; what follows is an informal overview. You can also find <a href="https://github.com/ikuehne/TAstic">the source code</a> for the resulting project on GitHub.</p>
+<h2 id="the-minhash-algorithm">The MinHash Algorithm</h2>
+<p>The abstract problem that MinHash solves is determining <em>set similarity</em>: how many items do two sets have in common? We can define an intuitive proxy for this idea. Given sets <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>, we want their <a href="https://en.wikipedia.org/wiki/Jaccard_index">Jaccard coefficient</a>, defined by</p>
+<p><span class="math display">\[ J(A, B) = \frac{\left|A \cap B\right|}{\left|A \cup B\right|}\]</span></p>
+<p>Or, in words, the fraction of the two sets that is in their intersection. This probably seems like it should be an easy problem to solve; just represent the two sets as hash tables and then compute the sizes of their intersection and union in the obvious way:</p>
+<div class="sourceCode"><pre class="sourceCode python"><code class="sourceCode python"><span class="kw">def</span> similarity(l1, l2):
+    A <span class="op">=</span> <span class="bu">set</span>(l1)
+    B <span class="op">=</span> <span class="bu">set</span>(l2)
+    <span class="cf">return</span> <span class="bu">len</span>(A.intersection(B)) <span class="op">/</span> <span class="bu">len</span>(A.union(B))</code></pre></div>
+<p>Indeed that works, but it does not scale very well. Let <span class="math inline">\(k\)</span> be the number of sets, and <span class="math inline">\(n\)</span> the size of the largest set. Then the method above requires <span class="math inline">\(O(kn)\)</span> time to put everything in hash tables, and <span class="math inline">\(O(n)\)</span> time for each of <span class="math inline">\(O(k^2)\)</span> pairs of sets. In all, that is <span class="math inline">\(O(k^2n)\)</span>. The space to hold all of these hash tables, meanwhile, is <span class="math inline">\(O(kn)\)</span>. Of course, for large enough <span class="math inline">\(k\)</span> and <span class="math inline">\(n\)</span>, this becomes infeasible.</p>
+<p>Who needs to compare similarities of lots of large sets? The original application was actually in search engines, but I find that example a little abstruse. Instead, consider plagiarism detection. Systems like <a href="http://www.turnitin.com">turnitin.com</a> allow students to (be forced to) submit their work and have it be compared against all other students' and a large corpus of other works, such as papers in academic journals. Commercial plagiarism-detection systems compare each submitted document against many thousands of other documents; if each document is a set of a few tens of thousands of elements, there is no way they have the memory or processing power to compare all of them.</p>
+<p>What we want is a short <em>signature</em> of each set that we can compare to the signature of another set to guess the similarities of the set. If this signature is a few hundred bytes long, millions of them can be stored in memory, and comparisons can be very cheap.</p>
+<p>This is exactly what MinHash does. To compute the signatures of a set of sets, we first generate <span class="math inline">\(h\)</span> random hash functions, for some small <span class="math inline">\(h\)</span> (typically hundreds). Then, to compute the signature of the <span class="math inline">\(i\)</span>th set <span class="math inline">\(S_i\)</span>, for each hash function <span class="math inline">\(f_j\)</span> we let <span class="math display">\[m_j = \underset{S_i}{\arg\min}(f_j)\]</span> That is, <span class="math inline">\(m_j\)</span> is the element of <span class="math inline">\(S_i\)</span> that minimizes that hash function. The signature is then the sequence <span class="math inline">\(m_1, m_2, \ldots, m_h\)</span>.</p>
+<p>To estimate the similarity of two sets based on their signatures <span class="math inline">\(m_1\)</span> and <span class="math inline">\(m_2\)</span>, we take <span class="math display">\[\left|i: m_{1, i} = m_{2, i}\right|\]</span> Why does this somewhat alchemical formula work as expected? Formally, the similarity of the signatures of two sets is an unbiased estimator of their Jaccard similarity. That is, letting <span class="math inline">\(M(A, B)\)</span> be the MinHash estimate of <span class="math inline">\(J(A, B)\)</span>, <span class="math inline">\(E(M(A, B)) = J(A, B)\)</span>.</p>
+<p>Here's my justification for this claim, which isn't quite a proof: clearly, in the limit of large <span class="math inline">\(h\)</span> <span class="math inline">\(E(M(A, B))\)</span> is the probability that a random hash function has the same minimum value in <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>. Assuming no collisions, this is equivalent to the probability that a random hash function's minimum value in <span class="math inline">\(A \cup B\)</span> lies in <span class="math inline">\(A \cap B\)</span>. For a truly random hash function, this is just <span class="math inline">\(\frac{|A \cap B|}{|A \cup B|}\)</span>, or <span class="math inline">\(J(A, B)\)</span>.</p>
+<p>One caveat, as you might have noticed, is that any real hash function sometimes gives collisions. We can hand-wave this away by saying that there are plenty of practical hash functions which have a very low probability of collisions.</p>
+<p>There is a more subtle problem, though. It is actually very difficult even to specify, let alone generate, a truly random hash function. Note that each permutation of a set corresponds to a hash function on that set; just let its hash value be its position in the permutation. Thus the number of hash functions of a set is at least the number of permutations of the set. If the size of the domain of our random hash functions (i.e., the number of unique elements in your sets) is <span class="math inline">\(d\)</span>, there are <span class="math inline">\(d!\)</span> possibe permutations of the domain, and thus <span class="math inline">\(\log(d!)\)</span> bits are required to specify one such permutation. By Stirling's approximation this is <span class="math inline">\(\Omega(d \log(d))\)</span>. If <span class="math inline">\(d\)</span> is of order <span class="math inline">\(10 ^ 9\)</span>, which is perfectly possible for real applications, this is infeasible. Again, we can hand-wave this away: randomly picking a hash function from some suitably random-seeming <em>subset</em> of the possible permutations ought to be perfectly acceptable, even if that subset is relatively small. If we just specify a hash function with a 64-bit integer there are about <span class="math inline">\(10 ^ 19\)</span> possible hash functions.</p>
+<h2 id="applying-minhash-to-plagiarism">Applying MinHash to Plagiarism</h2>
+<p>On Caltech's Board of Control, which handles cases of academic dishonesty among the undergraduates, we're always struck by how <em>bad</em> many students are at cheating. Many of our cases involve wholesale copy-pasting from other students. As a TA, I can see why we get that impression: student's assignments are never systematically compared to each other, so only really egregious cases get spotted, and then only when the submissions are graded by the same person.</p>
+<p>Unfortunately, the BoC's impression is probably subject to selection bias: there are plenty of good cheaters, but they rarely get caught. Moreover, there are probably lots of bad cheaters who get lucky and <em>still</em> aren't caught. This shouldn't be hard to prevent. You can probably tell where I'm going with this...</p>
+<p>I decided to create a simple, simple-to-use plagiarism detection system for plain text, with the idea that all assignments for a class can be compared against each other to find similar pairs. In my next post, I'll describe the design and implementation of the system.</p>
+
+                <br />
+                <div class="footer">
+                    Generated by
+                    <a href="http://jaspervdj.be/hakyll">Hakyll</a>
+                    <br />
+                    Hosted by
+                    <a href="https://www.github.com">Github</a>
+                    <br />
+                </div>
+            </div>
+        </div>
+    </body>
+</html>
